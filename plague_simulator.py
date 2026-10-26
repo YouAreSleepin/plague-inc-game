@@ -275,22 +275,26 @@ class Game:
             self.news.pop(0)
 
     def tick(self):
-        """Раз в секунду обновляет пандемию."""
-        self.elapsed += TICK_INTERVAL  # игровой час (в главном цикле время идёт сам)
+        """Раз в секунду обновляет пандемию (дискретный шаг модели)."""
         v = self.virus
         new_dna = 0
 
+        # --- Фаза 1: рост заражения и смертность в активных очагах -------
         for r in self.regions:
             if not r.infected_bool or r.infected <= 0:
                 continue
-            # Рост заразы: экспоненциально, зависит от infect_rate и плотности
-            growth = int(max(1, r.infected * (0.10 + 0.03 * v.infect_rate))) \
-                     + max(1, int(r.healthy * 0.01 * v.infect_rate)) if r.infected > 0 else 0
-            growth = min(growth, r.healthy)
+            # Рост заразы: экспоненциально, зависит от infect_rate и плотности.
+            # min(..., healthy // 2) — вирус не «съедает» весь регион за один
+            # тик: часть населения всегда остаётся здоровой и является
+            # резервуаром для дальнейшего распространения.
+            growth = int(r.infected * (0.10 + 0.03 * v.infect_rate)) \
+                     + int(r.healthy * 0.01 * v.infect_rate)
+            growth = min(growth, r.healthy // 2)
             r.healthy -= growth
             r.infected += growth
 
-            # Смерти: зависят от летальности и доли заражённых
+            # Смерти: зависят от летальности и доли заражённых.
+            # При летальности 0 носительство бессмертно — вирус не «угасает».
             if v.lethality > 0 and r.infected > 0:
                 deaths = int(max(1, r.infected * (0.001 + v.lethality * 0.0011)))
                 deaths = min(deaths, r.infected)
@@ -304,21 +308,25 @@ class Game:
                 r.dead_region = True
                 self.add_news(f"[СМЕРТЬ] Регион {r.name} полностью вымер.")
 
-            # Заражение соседей
-            if r.infected > 50 and r.healthy > 0:
-                for nb_idx in r.neighbors:
-                    nb = self.regions[nb_idx]
-                    if nb.healthy > 0 and not nb.infected_bool:
-                        chance = v.spread_chance * (r.infected / r.total_pop)
-                        if random.random() < chance:
-                            nb.infected_bool = True
-                            nb.infected = 1
-                            nb.healthy -= 1
-                            new_dna += 2  # бонус ДНК за новую страну
-                            self.add_news(f"[+] Вирус перекинулся: {nb.name}")
-                            break
-
             new_dna += 2 + int(r.infected / 5_000_000)  # ДНК за активность очага
+
+        # --- Фаза 2: распространение по соседям --------------------------
+        # Отдельно от фазы роста, чтобы свежий нулевой пациент (infected==1)
+        # мог стать источником заражения, как только накопит носителей.
+        for r in self.regions:
+            if not r.infected_bool or r.infected <= 50:
+                continue
+            for nb_idx in r.neighbors:
+                nb = self.regions[nb_idx]
+                if nb.healthy > 0 and not nb.infected_bool:
+                    chance = v.spread_chance * (r.infected / r.total_pop)
+                    if random.random() < chance:
+                        nb.infected_bool = True
+                        nb.infected = 1
+                        nb.healthy -= 1
+                        new_dna += 2  # бонус ДНК за новую страну
+                        self.add_news(f"[+] Вирус перекинулся: {nb.name}")
+                        break
 
         # Глобальные прыжки (высшая прокачка передачи)
         if 4 in v.bought["transmission"]:
@@ -378,8 +386,8 @@ class Game:
                 self.game_over = True
                 self.win = False
                 self.end_reason = "Вирус угас: не осталось носителей, а здоровые регионы целы."
-            elif not remaining_healthy and alive_total > 0 and alive_total < 1000:
-                # Все здоровы умерли, оставшиеся больные обречены — засчитываем победу
+            elif not remaining_healthy and 0 < alive_total < 1000:
+                # Все здоровые умерли, оставшиеся больные обречены — победа
                 self.game_over = True
                 self.win = True
                 self.end_reason = "Человечество уничтожено. Оставшиеся больные обречены. Победа!"
@@ -591,6 +599,8 @@ class Game:
                     self.handle_click(ev.pos)
 
             if self.started and not self.game_over:
+                # Игровые часы (для лекарства) идут в реальном времени,
+                # а дискретная модель пандемии обновляется раз в секунду.
                 self.elapsed += dt
                 self.tick_timer += dt
                 while self.tick_timer >= TICK_INTERVAL:
