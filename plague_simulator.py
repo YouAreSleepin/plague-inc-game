@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 ПРАКТИКА «ПАТОГЕН» — симулятор эпидемии в стиле Plague Inc.
-Игра на Python + Pygame. Один файл, без внешних ресурсов.
+Игра на Python + Pygame. Один файл, готов к упаковке через PyInstaller.
 
 Управление:
   - Клик по региону на карте — заражение нулевого пациента (старт игры).
@@ -9,10 +9,21 @@
   - ESC — выйти, R — рестарт после конца игры.
 """
 
+import os
 import random
 import sys
 
 import pygame
+
+
+def resource_path(relative_path):
+    """Получает абсолютный путь к ресурсу, работает для dev и PyInstaller exe."""
+    try:
+        # PyInstaller создаёт временную папку _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
 
 # ============================== НАСТРОЙКИ ==============================
 
@@ -217,10 +228,26 @@ class Game:
         self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
         self.clock = pygame.time.Clock()
 
-        self.font_big = pygame.font.SysFont("arial", 26, bold=True)
-        self.font = pygame.font.SysFont("arial", 18)
-        self.font_small = pygame.font.SysFont("arial", 14)
-        self.font_tiny = pygame.font.SysFont("arial", 12)
+        # Шрифты: пробуем загрузить из assets (для PyInstaller), иначе системный Arial
+        font_path = resource_path(os.path.join("assets", "fonts", "DejaVuSans.ttf"))
+        if os.path.exists(font_path):
+            self.font_big = pygame.font.Font(font_path, 26)
+            self.font = pygame.font.Font(font_path, 18)
+            self.font_small = pygame.font.Font(font_path, 14)
+            self.font_tiny = pygame.font.Font(font_path, 12)
+        else:
+            self.font_big = pygame.font.SysFont("arial", 26, bold=True)
+            self.font = pygame.font.SysFont("arial", 18)
+            self.font_small = pygame.font.SysFont("arial", 14)
+            self.font_tiny = pygame.font.SysFont("arial", 12)
+
+        # Иконка окна (если есть в assets/icon.ico)
+        icon_path = resource_path(os.path.join("assets", "icon.ico"))
+        if os.path.exists(icon_path):
+            try:
+                pygame.display.set_icon(pygame.image.load(icon_path))
+            except Exception:
+                pass
 
         self.reset()
 
